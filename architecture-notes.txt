@@ -1,0 +1,71 @@
+CONTENT BROADCASTING SYSTEM — ARCHITECTURE NOTES
+=================================================
+
+1. AUTHENTICATION & RBAC FLOW
+- JWT tokens returned on login/register
+- Two roles: principal and teacher
+- authenticate middleware verifies JWT and attaches req.user
+- authorize(...roles) middleware checks role
+- Public /content/live/:teacherId requires NO authentication
+
+2. SUBJECT-BASED SYSTEM DESIGN
+- Subjects are free-form strings (maths, science, etc.)
+- Each teacher+subject has one content_slot row
+- Multiple content items per slot via content_schedule
+- Each subject rotates independently
+
+3. UPLOAD HANDLING
+- Multer handles multipart/form-data
+- Files stored in src/uploads/ with unique names
+- Only JPG, PNG, GIF accepted (validated by MIME type)
+- Max file size: 10MB
+- Files served statically at /uploads/:filename
+- On DB failure, uploaded file is deleted
+
+4. APPROVAL WORKFLOW
+- All content starts as pending on upload
+- Only principal can approve or reject
+- Reject requires rejection_reason
+- Approved content gets approved_by and approved_at
+- Cannot approve/reject already reviewed content
+
+5. SCHEDULING/ROTATION LOGIC (CORE)
+Algorithm in scheduling.service.js:
+- Filter: Only approved content where now >= start_time AND now < end_time
+- Sort items by rotation_order ascending
+- Find epoch = earliest start_time among active items
+- Compute cycleDuration = sum of all durations in seconds
+- elapsedSeconds = (now - epoch) in seconds
+- positionInCycle = elapsedSeconds % cycleDuration (loops)
+- Walk through items by accumulated duration to find active item
+
+Example (3 items x 5 min = 15 min cycle):
+  t=0min  -> Content A
+  t=5min  -> Content B
+  t=10min -> Content C
+  t=15min -> Content A (loops)
+
+6. DATABASE DESIGN
+Tables: users, content, content_slots, content_schedule
+- UUID primary keys prevent enumeration attacks
+- content_slots: unique per teacher+subject
+- content_schedule: stores rotation_order and duration
+- Indexes on uploaded_by, status, subject for performance
+
+7. FOLDER STRUCTURE
+src/
+  app.js              - Entry point
+  config/             - DB, migrations, seed
+  controllers/        - HTTP handlers
+  routes/             - Express routers
+  services/           - Business logic
+  middlewares/        - Auth, upload, validation
+  utils/              - JWT, response helpers
+  uploads/            - Local file storage
+
+8. SCALABILITY APPROACH
+- PostgreSQL connection pool (max 20)
+- Stateless JWT auth = horizontally scalable
+- Redis caching for /content/live (bonus)
+- S3 for file storage in production (bonus)
+- Rate limiting on public endpoint
